@@ -52,12 +52,7 @@ data:
     PET_ORDINAL=$(cat /etc/podinfo/pod_name | rev | cut -d- -f1)
 
     redis-server /conf/redis.conf &
-    # Discover peers
-    wget https://storage.googleapis.com/kubernetes-release/pets/peer-finder -O /bin/peer-finder
-    chmod u+x /bin/peer-finder
-    peer-finder -on-start 'tee > /conf/initial_peers' -service redis-cluster -ns $POD_NAMESPACE
 
-    # TODO: Wait until redis-server process is ready
     sleep 1
 
     if [ $PET_ORDINAL = "0" ]; then
@@ -66,15 +61,27 @@ data:
     else
       # Other members of the cluster join as slaves
       # TODO: Get list of peers using the peer finder using an init container
-      PEER_IP=$(perl -MSocket -e 'print inet_ntoa(scalar(gethostbyname("redis-cluster-0.redis-cluster.default.svc.cluster.local")))')
+
+      # rule : podname.subdomain.namespace.svc.cluster.local
+      nsName=redis-cluster-$PET_ORDINAL.redis-cluster.default.svc.cluster.local
+      echo "nsName:"$nsName
+      
+      # sleep 15 second to wait k8s cluster ready
+      sleep 15
+      
+      nslookup $nsName
+      PEER_IP=$(nslookup $nsName | awk -v name="${nsName}" '$0 ~ name {getline;print}' | cut -d " " -f2)
+      
+      echo "PEER_IP:"$PEER_IP
+      
       redis-cli cluster meet $PEER_IP 6379
-      sleep 1
 
       #echo redis-cli --csv cluster slots
-      #redis-cli --csv cluster slots
+      redis-cli --csv cluster slots
 
       # Become the slave of a random master node
       MASTER_ID=$(redis-cli --csv cluster slots | cut -d, -f 5 | sed -e 's/^"//'  -e 's/"$//')
+      echo "MASTER_ID:"$MASTER_ID
       redis-cli cluster replicate $MASTER_ID
     fi
 
@@ -86,7 +93,7 @@ metadata:
   name: redis-cluster
 spec:
   serviceName: redis-cluster
-  replicas: 6
+  replicas: 3
   template:
     metadata:
       labels:
@@ -101,7 +108,7 @@ spec:
       #hostNetwork: true
       containers:
       - name: redis-cluster
-        image: redis:3.2.1
+        image: YOUR_OWN_IMAGE_REGISTRY/redis_cluster
         ports:
         - containerPort: 6379
           name: client
@@ -122,7 +129,7 @@ spec:
           initialDelaySeconds: 15
           timeoutSeconds: 5
 
-        # Mark a node as down if Redis server stops running
+        Mark a node as down if Redis server stops running
         livenessProbe:
           exec:
             command:
@@ -151,7 +158,7 @@ spec:
           items: 
           - key: redis.conf
             path: redis.conf
-          - key: bootstrap-pod.sh  # TODO: Move this or extract it into its own Docker image
+          - key: bootstrap-pod.sh  
             path: bootstrap-pod.sh
       # The init container will use this info to find cluster peers
       - name: podinfo
