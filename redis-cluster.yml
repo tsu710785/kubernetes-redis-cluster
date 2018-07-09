@@ -60,21 +60,21 @@ data:
       redis-cli cluster addslots $(seq 0 16383)
     else
       # Other members of the cluster join as slaves
-      # TODO: Get list of peers using the peer finder using an init container
 
       # rule : podname.subdomain.namespace.svc.cluster.local
+      masterName=redis-cluster-0.redis-cluster.default.svc.cluster.local
       nsName=redis-cluster-$PET_ORDINAL.redis-cluster.default.svc.cluster.local
+      
       echo "nsName:"$nsName
-      
-      # sleep 15 second to wait k8s cluster ready
-      sleep 15
-      
+      sleep 30
+
       nslookup $nsName
       PEER_IP=$(nslookup $nsName | awk -v name="${nsName}" '$0 ~ name {getline;print}' | cut -d " " -f2)
-      
+      MASTER_IP=$(nslookup $masterName | awk -v name="${masterName}" '$0 ~ name {getline;print}' | cut -d " " -f2)
       echo "PEER_IP:"$PEER_IP
+      echo "MASTER_IP:"$MASTER_IP
       
-      redis-cli cluster meet $PEER_IP 6379
+      redis-cli cluster meet $MASTER_IP 6379
 
       #echo redis-cli --csv cluster slots
       redis-cli --csv cluster slots
